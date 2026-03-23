@@ -1,52 +1,51 @@
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
-from langchain_core.messages import HumanMessage, AIMessage
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.output_parsers import JsonOutputParser
-from pydantic import BaseModel
-import json
+from langchain_community.document_loaders import TextLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.vectorstores import FAISS
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 
 load_dotenv()
 
-model = ChatGroq(model="llama-3.3-70b-versatile")
+loader = TextLoader(r"C:\Users\alex\Desktop\langchain_first\documents.txt", encoding="utf-8")
 
-class FraudAnalysis(BaseModel):
-    risk_score: int
-    is_suspicious: bool
-    reason: str
-    action: str
+documents = loader.load()
 
-parser = JsonOutputParser(pydantic_object=FraudAnalysis)
+splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+chunks = splitter.split_documents(documents)
+
+embeddings = HuggingFaceEmbeddings(
+    model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+)
+vectorstore = FAISS.from_documents(chunks, embeddings)
+retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
 
 template = ChatPromptTemplate.from_messages([
-    ("system", "Ты фрод-аналитик. Возвращай ТОЛЬКО JSON.\n{format_instructions}"),
-    MessagesPlaceholder(variable_name="history"),
-    ("human", "{input}"),
+    ("system", """Ты helpful ассистент. Отвечай на вопросы ТОЛЬКО на основе предоставленного контекста.
+Если ответа нет в контексте — так и скажи.
+
+Контекст:
+{context}"""),
+    ("human", "{question}"),
 ])
 
-chain = template | model | parser
+model = ChatGroq(model="llama-3.3-70b-versatile")
 
-history = []
+def format_docs(docs):
+    return "\n\n".join(doc.page_content for doc in docs)
 
-while True:
-    user_input = input("Транзакция: ")
-    if user_input.lower() == "выход":
-        break
+chain = (
+    {
+        "context": retriever | format_docs,
+        "question": lambda x: x
+    }
+    | template
+    | model
+    | StrOutputParser()
+)
 
-    try:
-        response = chain.invoke({
-            "input": user_input,
-            "history": history,
-            "format_instructions": parser.get_format_instructions(),
-        })
-    except Exception as e:
-        print("Ошибка парсинга, попробуй ещё раз")
-        continue
-
-    history.append(HumanMessage(content=user_input))
-    history.append(AIMessage(content=json.dumps(response, ensure_ascii=False)))
-
-    if response['risk_score'] > 7:
-        print(f"Транзакция заблокирована: {response['reason']}")
-    else:
-        print(f"Транзакция одобрена. Риск: {response['risk_score']}/10")
+question = input("Вопрос: ")
+response = chain.invoke(question)
+print(response)
