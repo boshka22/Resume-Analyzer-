@@ -1,12 +1,14 @@
 """Модуль эндпоинтов для анализа резюме."""
 
-from fastapi import APIRouter, Depends, File, Path, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Path, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_session
 from app.schemas.v1.resume import (
+    AnalyzeTaskResponse,
     ResumeAnalysisHistoryResponse,
     ResumeAnalysisResponse,
+    TaskStatusResponse,
 )
 from app.services.resume import ResumeService
 
@@ -36,30 +38,57 @@ def get_resume_service(
 
 @router.post(
     path='/analyze',
-    summary='Анализ резюме',
-    description='Принимает файл резюме в формате PDF или TXT и возвращает детальный анализ.',
-    response_model=ResumeAnalysisResponse,
-    status_code=status.HTTP_200_OK,
+    summary='Запустить анализ резюме',
+    description='Принимает файл, ставит задачу в очередь. Возвращает task_id немедленно.',
+    response_model=AnalyzeTaskResponse,
+    status_code=status.HTTP_202_ACCEPTED,
     responses={
-        200: {'description': 'Успешный анализ резюме'},
+        202: {'description': 'Задача принята в обработку'},
         400: {'description': 'Некорректный файл или формат'},
-        500: {'description': 'Внутренняя ошибка сервера'},
     },
 )
 async def analyze_resume(
     file: UploadFile = File(...),
+    callback_url: str | None = Form(default=None),
     service: ResumeService = Depends(get_resume_service),
-) -> ResumeAnalysisResponse:
-    """Анализирует загруженное резюме и сохраняет результат в БД.
+) -> AnalyzeTaskResponse:
+    """Принимает файл резюме и ставит задачу анализа в очередь Celery.
 
     Args:
         file: Файл резюме в формате PDF или TXT. Максимальный размер 5MB.
+        callback_url: URL для webhook
         service: Экземпляр ResumeService из dependency injection.
 
     Returns:
-        ResumeAnalysisResponse: Полный отчёт анализа резюме.
+        AnalyzeTaskResponse: ID таска и статус pending.
     """
-    return await service.analyze(file=file)
+    return await service.analyze(file=file, callback_url=callback_url)
+
+
+@router.get(
+    path='/analyze/{task_id}/status',
+    summary='Статус анализа',
+    description='Возвращает текущий статус задачи и результат если анализ завершён.',
+    response_model=TaskStatusResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        200: {'description': 'Статус задачи'},
+    },
+)
+async def get_task_status(
+    task_id: str = Path(...),
+    service: ResumeService = Depends(get_resume_service),
+) -> TaskStatusResponse:
+    """Поллинг статуса задачи анализа резюме.
+
+    Args:
+        task_id: ID Celery таска полученный из POST /analyze.
+        service: Экземпляр ResumeService из dependency injection.
+
+    Returns:
+        TaskStatusResponse: Статус и результат если готов.
+    """
+    return await service.get_task_status(task_id=task_id)
 
 
 @router.get(

@@ -1,8 +1,10 @@
 fastapi
 uvicorn
-langchain-groq
-langgraph
 langchain-core
+langgraph
+langchain-groq
+langchain-google-genai
+langchain-ollama
 pypdf2
 python-multipart
 python-dotenv
@@ -11,10 +13,12 @@ pydantic-settings
 sqlalchemy
 asyncpg
 alembic
+celery[redis]
+redis
+httpx
 testcontainers
 pytest
 pytest-asyncio
-httpx
 ruff
 mypy
 pre-commit

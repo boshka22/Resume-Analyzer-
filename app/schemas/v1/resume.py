@@ -88,3 +88,38 @@ class ResumeAnalysisHistoryResponse(BaseModel):
 
     items: list[ResumeAnalysisHistoryItem]
     total: int
+
+
+class TaskStatus(StrEnum):
+    """Статус фонового таска Celery."""
+
+    pending = 'pending'
+    started = 'started'
+    success = 'success'
+    failure = 'failure'
+
+
+class AnalyzeTaskResponse(BaseModel):
+    """Ответ при создании таска — возвращается мгновенно.
+
+    Attributes:
+        task_id: ID таска для последующего поллинга.
+        status: Всегда pending в момент создания.
+    """
+
+    task_id: str
+    status: TaskStatus
+
+
+class TaskStatusResponse(BaseModel):
+    """Ответ при поллинге статуса.
+
+    Attributes:
+        task_id: ID таска.
+        status: Текущий статус.
+        result: Результат анализа если таск завершён, иначе None.
+    """
+
+    task_id: str
+    status: TaskStatus
+    result: ResumeAnalysisResponse | None = None

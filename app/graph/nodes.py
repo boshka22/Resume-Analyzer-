@@ -1,9 +1,9 @@
 """Модуль узлов LangGraph графа анализа резюме."""
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_groq import ChatGroq
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 from app.core.config import settings
 from app.graph.state import ResumeState
@@ -16,20 +16,53 @@ __all__ = [
     'compile_report',
 ]
 
-_model = ChatGroq(
-    model=settings.model_name,
-    temperature=settings.model_temperature,
-)
+
+def _get_model() -> BaseChatModel:
+    """Возвращает LLM модель в зависимости от настроенного провайдера.
+
+    Returns:
+        BaseChatModel: Инстанс языковой модели.
+
+    Raises:
+        ValueError: Если провайдер не поддерживается.
+    """
+    provider = settings.llm_provider.lower()
+
+    if provider == 'groq':
+        from langchain_groq import ChatGroq
+
+        return ChatGroq(
+            model=settings.model_name,
+            temperature=settings.model_temperature,
+            api_key=SecretStr(settings.groq_api_key),
+        )
+
+    if provider == 'gemini':
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
+        return ChatGoogleGenerativeAI(
+            model=settings.model_name,
+            temperature=settings.model_temperature,
+            google_api_key=settings.google_api_key,
+        )
+
+    if provider == 'ollama':
+        from langchain_ollama import ChatOllama
+
+        return ChatOllama(
+            model=settings.model_name,
+            temperature=settings.model_temperature,
+            base_url=settings.ollama_base_url,
+        )
+
+    raise ValueError(f'Неизвестный LLM провайдер: {provider}. Доступны: groq, gemini, ollama')
+
+
+_model = _get_model()
 
 
 class _CriteriaResult(BaseModel):
-    """Внутренняя схема результата анализа по одному критерию.
-
-    Attributes:
-        score: Оценка от 1 до 10.
-        feedback: Краткий фидбек по критерию.
-        suggestions: Список конкретных советов по улучшению.
-    """
+    """Внутренняя схема результата анализа по одному критерию."""
 
     score: int = Field(description='Оценка от 1 до 10')
     feedback: str = Field(description='Краткий фидбек 1-2 предложения')
@@ -41,16 +74,7 @@ def _analyze_criteria(
     criteria: str,
     instructions: str,
 ) -> dict:
-    """Универсальная функция анализа резюме по заданному критерию.
-
-    Args:
-        resume_text: Текст резюме для анализа.
-        criteria: Название критерия анализа.
-        instructions: Подробные инструкции для анализа по критерию.
-
-    Returns:
-        dict: Результат анализа с полями score, feedback, suggestions.
-    """
+    """Универсальная функция анализа резюме по заданному критерию."""
     parser = JsonOutputParser(pydantic_object=_CriteriaResult)
 
     template = ChatPromptTemplate.from_messages(
@@ -79,14 +103,7 @@ def _analyze_criteria(
 
 
 def analyze_skills(state: ResumeState) -> dict:
-    """Анализирует навыки и технический стек в резюме.
-
-    Args:
-        state: Текущее состояние графа с текстом резюме.
-
-    Returns:
-        dict: Результат анализа навыков и обновлённый список оценок.
-    """
+    """Анализирует навыки и технический стек в резюме."""
     print('[Агент навыков] Анализирую...')
     result = _analyze_criteria(
         state['resume_text'],
@@ -101,14 +118,7 @@ def analyze_skills(state: ResumeState) -> dict:
 
 
 def analyze_experience(state: ResumeState) -> dict:
-    """Анализирует опыт работы в резюме.
-
-    Args:
-        state: Текущее состояние графа с текстом резюме.
-
-    Returns:
-        dict: Результат анализа опыта и обновлённый список оценок.
-    """
+    """Анализирует опыт работы в резюме."""
     print('[Агент опыта] Анализирую...')
     result = _analyze_criteria(
         state['resume_text'],
@@ -123,14 +133,7 @@ def analyze_experience(state: ResumeState) -> dict:
 
 
 def analyze_structure(state: ResumeState) -> dict:
-    """Анализирует структуру и оформление резюме.
-
-    Args:
-        state: Текущее состояние графа с текстом резюме.
-
-    Returns:
-        dict: Результат анализа структуры и обновлённый список оценок.
-    """
+    """Анализирует структуру и оформление резюме."""
     print('[Агент структуры] Анализирую...')
     result = _analyze_criteria(
         state['resume_text'],
@@ -145,14 +148,7 @@ def analyze_structure(state: ResumeState) -> dict:
 
 
 def analyze_language(state: ResumeState) -> dict:
-    """Анализирует язык и подачу информации в резюме.
-
-    Args:
-        state: Текущее состояние графа с текстом резюме.
-
-    Returns:
-        dict: Результат анализа языка и обновлённый список оценок.
-    """
+    """Анализирует язык и подачу информации в резюме."""
     print('[Агент языка] Анализирую...')
     result = _analyze_criteria(
         state['resume_text'],
@@ -167,14 +163,7 @@ def analyze_language(state: ResumeState) -> dict:
 
 
 def compile_report(state: ResumeState) -> dict:
-    """Собирает итоговый отчёт на основе результатов всех агентов.
-
-    Args:
-        state: Состояние графа с результатами всех агентов анализа.
-
-    Returns:
-        dict: Итоговый отчёт с общей оценкой, сильными сторонами и рекомендациями.
-    """
+    """Собирает итоговый отчёт на основе результатов всех агентов."""
     print('[Финальный агент] Составляю отчёт...')
 
     scores = state['scores']

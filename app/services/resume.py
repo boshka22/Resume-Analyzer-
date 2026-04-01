@@ -1,24 +1,27 @@
 """Модуль сервисного слоя для анализа резюме."""
 
+from celery.result import AsyncResult
 from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.graph.builder import build_resume_graph
+from app.celery_app import celery_app
 from app.parsers.file import extract_text
 from app.repositories.resume import ResumeRepository
 from app.schemas.v1.resume import (
     AnalysisStatus,
+    AnalyzeTaskResponse,
     CriteriaScore,
     ResumeAnalysisHistoryItem,
     ResumeAnalysisHistoryResponse,
     ResumeAnalysisResponse,
+    TaskStatus,
+    TaskStatusResponse,
 )
+from app.tasks.analyze import analyze_resume_task
 
 __all__ = [
     'ResumeService',
 ]
-
-_graph = build_resume_graph()
 
 MIN_RESUME_LENGTH = 100
 
@@ -26,8 +29,8 @@ MIN_RESUME_LENGTH = 100
 class ResumeService:
     """Сервис анализа резюме.
 
-    Отвечает за оркестрацию парсинга файла, запуск графа,
-    сохранение результата в БД и формирование ответа.
+    Отвечает за оркестрацию парсинга файла, постановку задачи в очередь,
+    получение статуса и формирование ответа.
     """
 
     def __init__(self, session: AsyncSession) -> None:
@@ -38,18 +41,21 @@ class ResumeService:
         """
         self._repo = ResumeRepository(session=session)
 
-    async def analyze(self, file: UploadFile) -> ResumeAnalysisResponse:
-        """Анализирует загруженный файл резюме и сохраняет результат в БД.
+    async def analyze(
+        self,
+        file: UploadFile,
+        callback_url: str | None = None,
+    ) -> AnalyzeTaskResponse:
+        """Принимает файл, ставит таск в очередь, возвращает task_id мгновенно.
 
         Args:
             file: Загруженный файл резюме в формате PDF или TXT.
-
+            callback_url: URL для webhook
         Raises:
             HTTPException: 400 — если резюме слишком короткое.
-            HTTPException: 500 — если произошла ошибка при анализе.
 
         Returns:
-            ResumeAnalysisResponse: Полный отчёт анализа резюме.
+            AnalyzeTaskResponse: ID таска и статус pending.
         """
         resume_text = await extract_text(file)
 
@@ -59,32 +65,53 @@ class ResumeService:
                 detail=f'Резюме слишком короткое. Минимум {MIN_RESUME_LENGTH} символов.',
             )
 
-        try:
-            result = _graph.invoke(
-                {
-                    'resume_text': resume_text,
-                    'skills_analysis': {},
-                    'experience_analysis': {},
-                    'structure_analysis': {},
-                    'language_analysis': {},
-                    'scores': [],
-                    'final_report': {},
-                }
-            )
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f'Ошибка анализа: {str(e)}',
-            ) from e
-
-        response = self._build_response(
-            result=result,
+        task = analyze_resume_task.delay(
+            resume_text=resume_text,
             file_name=file.filename,
+            callback_url=callback_url,
         )
 
-        await self._repo.create(response=response)
+        return AnalyzeTaskResponse(
+            task_id=task.id,
+            status=TaskStatus.pending,
+        )
 
-        return response
+    async def get_task_status(self, task_id: str) -> TaskStatusResponse:
+        """Читает статус таска из Redis через Celery backend.
+
+        Args:
+            task_id: ID Celery таска.
+
+        Returns:
+            TaskStatusResponse: Статус и результат если готов.
+        """
+        task_result = AsyncResult(task_id, app=celery_app)
+        raw_status = task_result.status.lower()
+
+        try:
+            task_status = TaskStatus(raw_status)
+        except ValueError:
+            task_status = TaskStatus.pending
+
+        result = None
+        if task_status == TaskStatus.success and task_result.result:
+            raw = task_result.result
+            criteria = {key: CriteriaScore(**val) for key, val in raw['criteria'].items()}
+            result = ResumeAnalysisResponse(
+                status=AnalysisStatus.success,
+                overall_score=raw['overall_score'],
+                summary=raw['summary'],
+                criteria=criteria,
+                top_strengths=raw['top_strengths'],
+                top_improvements=raw['top_improvements'],
+                file_name=raw.get('file_name'),
+            )
+
+        return TaskStatusResponse(
+            task_id=task_id,
+            status=task_status,
+            result=result,
+        )
 
     async def get_history(
         self,
@@ -153,39 +180,4 @@ class ResumeService:
             top_strengths=model.top_strengths,
             top_improvements=model.top_improvements,
             file_name=model.file_name,
-        )
-
-    def _build_response(
-        self,
-        result: dict,
-        file_name: str | None,
-    ) -> ResumeAnalysisResponse:
-        """Формирует Pydantic ответ из результата графа.
-
-        Args:
-            result: Результат выполнения LangGraph графа.
-            file_name: Имя загруженного файла.
-
-        Returns:
-            ResumeAnalysisResponse: Структурированный ответ API.
-        """
-        report = result['final_report']
-
-        criteria = {
-            key: CriteriaScore(
-                score=val['score'],
-                feedback=val['feedback'],
-                suggestions=val.get('suggestions', []),
-            )
-            for key, val in report['criteria'].items()
-        }
-
-        return ResumeAnalysisResponse(
-            status=AnalysisStatus.success,
-            overall_score=report['overall_score'],
-            summary=report['summary'],
-            criteria=criteria,
-            top_strengths=report['top_strengths'],
-            top_improvements=report['top_improvements'],
-            file_name=file_name,
         )
