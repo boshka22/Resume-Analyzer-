@@ -105,10 +105,14 @@ class AnalyzeTaskResponse(BaseModel):
     Attributes:
         task_id: ID таска для последующего поллинга.
         status: Всегда pending в момент создания.
+        cached: True если результат получен из кэша.
+        result: Результат анализа если из кэша, иначе None.
     """
 
     task_id: str
     status: TaskStatus
+    cached: bool = False
+    result: ResumeAnalysisResponse | None = None
 
 
 class TaskStatusResponse(BaseModel):

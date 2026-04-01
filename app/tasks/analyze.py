@@ -1,10 +1,13 @@
 """Celery таск для фонового анализа резюме."""
 
 import asyncio
+import hashlib
 
 from celery import Task
+from redis.asyncio import Redis
 
 from app.celery_app import celery_app
+from app.core.config import settings
 from app.core.database import async_session_maker
 from app.graph.builder import build_resume_graph
 from app.repositories.resume import ResumeRepository
@@ -18,6 +21,9 @@ __all__ = ['analyze_resume_task']
 
 _graph = build_resume_graph()
 
+CACHE_TTL = 60 * 60 * 24
+CACHE_PREFIX = 'resume:analysis'
+
 
 async def _save_to_db(response: ResumeAnalysisResponse) -> int:
     """Сохраняет результат в БД. Возвращает ID записи."""
@@ -25,6 +31,27 @@ async def _save_to_db(response: ResumeAnalysisResponse) -> int:
         repo = ResumeRepository(session=session)
         model = await repo.create(response=response)
         return model.id_
+
+
+async def _save_to_cache(resume_text: str, response: ResumeAnalysisResponse) -> None:
+    """Сохраняет результат анализа в Redis кэш на 24 часа.
+
+    Args:
+        resume_text: Текст резюме — используется как основа ключа.
+        response: Результат анализа для кэширования.
+    """
+    text_hash = hashlib.md5(resume_text.encode()).hexdigest()
+    key = f'{CACHE_PREFIX}:{text_hash}'
+
+    redis = Redis.from_url(settings.redis_url, decode_responses=True)
+    try:
+        await redis.setex(
+            name=key,
+            time=CACHE_TTL,
+            value=response.model_dump_json(),
+        )
+    finally:
+        await redis.close()
 
 
 @celery_app.task(
@@ -39,7 +66,7 @@ def analyze_resume_task(
     file_name: str | None,
     callback_url: str | None = None,
 ) -> dict:
-    """Запускает граф и сохраняет результат в БД.
+    """Запускает граф, сохраняет результат в БД и кэш.
 
     Args:
         resume_text: Текст резюме.
@@ -85,6 +112,7 @@ def analyze_resume_task(
         loop = asyncio.new_event_loop()
         try:
             record_id = loop.run_until_complete(_save_to_db(response))
+            loop.run_until_complete(_save_to_cache(resume_text, response))
         finally:
             loop.close()
 

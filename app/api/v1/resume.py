@@ -1,6 +1,6 @@
 """Модуль эндпоинтов для анализа резюме."""
 
-from fastapi import APIRouter, Depends, File, Form, Path, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Path, Query, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_session
@@ -39,30 +39,39 @@ def get_resume_service(
 @router.post(
     path='/analyze',
     summary='Запустить анализ резюме',
-    description='Принимает файл, ставит задачу в очередь. Возвращает task_id немедленно.',
+    description='Принимает файл, ставит задачу в очередь. Возвращает task_id немедленно. '
+    'Если резюме уже анализировалось — возвращает результат из кэша мгновенно.',
     response_model=AnalyzeTaskResponse,
     status_code=status.HTTP_202_ACCEPTED,
     responses={
-        202: {'description': 'Задача принята в обработку'},
+        202: {'description': 'Задача принята в обработку или результат из кэша'},
         400: {'description': 'Некорректный файл или формат'},
     },
 )
 async def analyze_resume(
+    response: Response,
     file: UploadFile = File(...),
     callback_url: str | None = Form(default=None),
     service: ResumeService = Depends(get_resume_service),
 ) -> AnalyzeTaskResponse:
     """Принимает файл резюме и ставит задачу анализа в очередь Celery.
 
+    Перед постановкой в очередь проверяет кэш Redis. Если результат найден —
+    возвращает его мгновенно с заголовком X-Cache: HIT и полем cached=true.
+    Если кэша нет — ставит задачу в Celery и возвращает task_id для поллинга.
+
     Args:
+        response: Объект HTTP ответа для установки заголовков.
         file: Файл резюме в формате PDF или TXT. Максимальный размер 5MB.
-        callback_url: URL для webhook
+        callback_url: Опциональный URL для webhook уведомления о завершении анализа.
         service: Экземпляр ResumeService из dependency injection.
 
     Returns:
-        AnalyzeTaskResponse: ID таска и статус pending.
+        AnalyzeTaskResponse: ID таска и статус pending, либо результат из кэша.
     """
-    return await service.analyze(file=file, callback_url=callback_url)
+    result = await service.analyze(file=file, callback_url=callback_url)
+    response.headers['X-Cache'] = 'HIT' if result.cached else 'MISS'
+    return result
 
 
 @router.get(

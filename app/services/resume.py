@@ -4,6 +4,7 @@ from celery.result import AsyncResult
 from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.cache.resume import ResumeCache
 from app.celery_app import celery_app
 from app.parsers.file import extract_text
 from app.repositories.resume import ResumeRepository
@@ -63,6 +64,20 @@ class ResumeService:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f'Резюме слишком короткое. Минимум {MIN_RESUME_LENGTH} символов.',
+            )
+
+        cache = ResumeCache()
+        try:
+            cached_result = await cache.get(resume_text)
+        finally:
+            await cache.close()
+
+        if cached_result is not None:
+            return AnalyzeTaskResponse(
+                task_id='cached',
+                status=TaskStatus.success,
+                cached=True,
+                result=cached_result,
             )
 
         task = analyze_resume_task.delay(

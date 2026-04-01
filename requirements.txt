@@ -22,3 +22,4 @@ pytest-asyncio
 ruff
 mypy
 pre-commit
+types-redis
