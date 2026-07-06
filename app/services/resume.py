@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.cache.resume import ResumeCache
 from app.celery_app import celery_app
 from app.parsers.file import extract_text
+from app.pdf.generator import PDFGenerator
 from app.repositories.resume import ResumeRepository
 from app.schemas.v1.resume import (
     AnalysisStatus,
@@ -196,3 +197,19 @@ class ResumeService:
             top_improvements=model.top_improvements,
             file_name=model.file_name,
         )
+
+    async def export_to_pdf(self, id_: int) -> bytes:
+        """Экспортирует анализ резюме в PDF.
+
+        Args:
+            id_: Идентификатор записи.
+
+        Raises:
+            HTTPException: 404 — если запись не найдена.
+
+        Returns:
+            PDF файл в виде байтов.
+        """
+        analysis = await self.get_by_id(id_=id_)
+        generator = PDFGenerator()
+        return generator.generate(analysis)
