@@ -160,6 +160,7 @@ ollama pull llama3.2
 | `GET` | `/api/v1/resume/analyze/{task_id}/status` | Статус задачи и результат |
 | `GET` | `/api/v1/resume/history` | История анализов с пагинацией |
 | `GET` | `/api/v1/resume/{id}` | Получение анализа по ID из БД |
+| `GET` | `/api/v1/resume/{id}/export` | Экспорт анализа в PDF |
 | `GET` | `/health` | Проверка работоспособности |
 
 ## Примеры ответов
@@ -316,8 +317,8 @@ TTL resume:analysis:<хэш>
 - [x] Docker + docker-compose
 - [x] Линтеры (ruff, mypy) и pre-commit хуки
 - [x] Тесты с testcontainers
+- [x] Экспорт отчёта в PDF
 - [ ] Аутентификация (JWT)
 - [ ] Сравнение резюме с вакансией
-- [ ] Экспорт отчёта в PDF
 - [ ] LangSmith для мониторинга агентов
 - [ ] Kubernetes deployment
