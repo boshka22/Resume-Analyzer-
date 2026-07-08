@@ -153,3 +153,34 @@ async def get_by_id(
         ResumeAnalysisResponse: Полный отчёт анализа резюме.
     """
     return await service.get_by_id(id_=id_)
+
+
+@router.get(
+    path='/{id}/export',
+    summary='Экспорт анализа в PDF',
+    description='Скачивает результат анализа резюме в формате PDF.',
+    status_code=status.HTTP_200_OK,
+    responses={
+        200: {'description': 'PDF файл'},
+        404: {'description': 'Анализ не найден'},
+    },
+)
+async def export_to_pdf(
+    id_: int = Path(alias='id', ge=1),
+    service: ResumeService = Depends(get_resume_service),
+) -> Response:
+    """Экспортирует результат анализа резюме в PDF.
+
+    Args:
+        id_: Идентификатор записи анализа.
+        service: Экземпляр ResumeService из dependency injection.
+
+    Returns:
+        Response: PDF файл как attachment.
+    """
+    pdf_bytes = await service.export_to_pdf(id_=id_)
+    return Response(
+        content=pdf_bytes,
+        media_type='application/pdf',
+        headers={'Content-Disposition': f'attachment; filename="resume-analysis-{id_}.pdf"'},
+    )
