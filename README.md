@@ -1,8 +1,7 @@
 # Resume Analyzer API
+An AI service for result analysis based on LangGraph. It accepts a PDF or TXT file, simultaneously launches four specialized agents via Celery, and generates a detailed report that takes requirements and recommendations into account.
 
-AI сервис для анализа резюме на основе LangGraph. Принимает PDF или TXT файл, запускает четыре специализированных агента параллельно через Celery и возвращает детальный отчёт с оценками и рекомендациями.
-
-## Архитектура
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -36,102 +35,101 @@ AI сервис для анализа резюме на основе LangGraph. 
                       │
                compile_report
                       │
-               сохранить в БД + кэш Redis (TTL 24ч)
+      Save to DB + Redis cache (TTL 24h)
                       │
-         (опционально) webhook → callback_url
+         (optional) webhook → callback_url
 ```
 
 ## Стек
 
 - **Python 3.11**
 - **FastAPI** — REST API
-- **LangGraph** — оркестрация агентов
-- **LangChain** — интеграция с LLM провайдерами
-- **Celery + Redis** — фоновая обработка и очередь задач
-- **Redis Cache** — кэширование результатов (Cache-Aside, TTL 24ч)
-- **PostgreSQL 16** — хранение истории анализов
-- **SQLAlchemy** — асинхронный ORM
-- **Docker + docker-compose** — контейнеризация
-- **Ruff + mypy** — линтеры
-- **pytest + testcontainers** — тесты
+- **LangGraph** — agent orchestration
+- **LangChain** — integration with LLM providers
+- **Celery + Redis** — background processing and task queue
+- **Redis Cache** — result caching (Cache-Aside, 24h TTL)
+- **PostgreSQL 16** — analysis history storage
+- **SQLAlchemy** — asynchronous ORM
+- **Docker + docker-compose** — containerization
+- **Ruff + mypy** — linters
+- **pytest + testcontainers** — testing
 
-## Поддерживаемые LLM провайдеры
+## Supported LLM Providers
 
-Провайдер выбирается через переменную `LLM_PROVIDER` в `.env`. Менять код не нужно.
+The provider is selected via the `LLM_PROVIDER` variable in `.env`. No code changes are required.
 
-| Провайдер | Модель по умолчанию | Где взять ключ |
+| Provider | Default model | Where to get the key |
 |-----------|---------------------|----------------|
-| `groq` | `llama-3.3-70b-versatile` | [console.groq.com](https://console.groq.com) — бесплатно |
-| `gemini` | `gemini-2.0-flash` | [aistudio.google.com](https://aistudio.google.com) — бесплатно |
+| `groq` | `llama-3.3-70b-versatile` | [console.groq.com](https://console.groq.com) — free |
+| `gemini` | `gemini-2.0-flash` | [aistudio.google.com](https://aistudio.google.com) — free |
 | `ollama` | `llama3.2` | Локально, без ключей — [ollama.com](https://ollama.com) |
 
-## Быстрый старт
+## Quick Start
 
-### Требования
+### Requirements
 
 - Docker + Docker Compose
 
-### Установка
+### Installation
 
 ```bash
 git clone https://github.com/boshka22/langchain_start
 cd resume-analyzer
 ```
 
-Создай `.env` файл и выбери провайдер:
+Create a `.env` file and select a provider:
 
 ```env
-# ── LLM провайдер ──────────────────────────────
-# Выбери один: groq | gemini | ollama
+# ── LLM Provider ───────────────────────────────
+# Choose one: groq | gemini | ollama
 LLM_PROVIDER=groq
 MODEL_NAME=llama-3.3-70b-versatile
 
-# Groq (бесплатно, https://console.groq.com)
-GROQ_API_KEY=твой-ключ
+# Groq (free, https://console.groq.com)
+GROQ_API_KEY=your-key
 
-# Gemini (бесплатно, https://aistudio.google.com)
+# Gemini (free, https://aistudio.google.com)
 # LLM_PROVIDER=gemini
 # MODEL_NAME=gemini-2.0-flash
-# GOOGLE_API_KEY=твой-ключ
+# GOOGLE_API_KEY=your-key
 
-# Ollama (локально, без ключей)
+# Ollama (local, no keys)
 # LLM_PROVIDER=ollama
 # MODEL_NAME=llama3.2
 # OLLAMA_BASE_URL=http://host.docker.internal:11434
 
-# ── Инфра ──────────────────────────────────────
+# ── Infrastructure ─────────────────────────────
 POSTGRES_DB=resume_analyzer
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=postgres
 DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/resume_analyzer
 REDIS_URL=redis://redis:6379/0
 ```
-
-Запусти:
+Run:
 
 ```bash
 docker-compose up --build
 ```
 
-API доступен на [http://localhost:8000/docs](http://localhost:8000/docs)
+The API is available at [http://localhost:8000/docs](http://localhost:8000/docs)
 
-### Ollama (локальная модель, без ключей)
+### Ollama (local model, no API keys required)
 
 ```bash
-# Установи Ollama с ollama.com, затем:
+# Install Ollama from ollama.com, then:
 ollama pull llama3.2
 
-# В .env выставь:
+# Set the following in .env:
 # LLM_PROVIDER=ollama
 # MODEL_NAME=llama3.2
 ```
 
-## Как работает асинхронный анализ
+## How asynchronous analysis works
 
-### Без кэша (первый запрос)
+### Without cache (first request)
 
 ```
-1. POST /analyze + файл
+1. POST /analyze + file
    → X-Cache: MISS
    → 202 Accepted {"task_id": "uuid", "status": "pending", "cached": false}
 
@@ -139,33 +137,33 @@ ollama pull llama3.2
 3. GET /analyze/{task_id}/status  →  {"status": "success", "result": {...}}
 ```
 
-### С кэшем (повторный запрос того же резюме)
+### With cache (repeat request for the same resume)
 
 ```
-1. POST /analyze + файл
+1. POST /analyze + file
    → X-Cache: HIT
    → 202 Accepted {"task_id": "cached", "status": "success", "cached": true, "result": {...}}
 ```
 
-Повторный запрос возвращает результат мгновенно — Celery не задействуется.
-Кэш живёт 24 часа, ключ — MD5 хэш текста резюме.
+Repeat requests return the result instantly—Celery is not involved.
+The cache persists for 24 hours; the cache key is the MD5 hash of the resume text.
 
-Опционально — передай `callback_url` в форме запроса. Когда анализ завершится, воркер сам сделает POST на этот URL с результатом.
+Optionally, you can pass a `callback_url` in the request form. Once analysis is complete, the worker will automatically send a POST request containing the result to that URL.
 
-## Эндпоинты
+## Endpoints
 
-| Метод | Путь | Описание |
+| Method | Path | Description |
 |-------|------|----------|
-| `POST` | `/api/v1/resume/analyze` | Запустить анализ резюме (PDF или TXT) |
-| `GET` | `/api/v1/resume/analyze/{task_id}/status` | Статус задачи и результат |
-| `GET` | `/api/v1/resume/history` | История анализов с пагинацией |
-| `GET` | `/api/v1/resume/{id}` | Получение анализа по ID из БД |
-| `GET` | `/api/v1/resume/{id}/export` | Экспорт анализа в PDF |
-| `GET` | `/health` | Проверка работоспособности |
+| `POST` | `/api/v1/resume/analyze` | Start resume analysis (PDF or TXT) |
+| `GET` | `/api/v1/resume/analyze/{task_id}/status` | Task status and result |
+| `GET` | `/api/v1/resume/history` | Analysis history with pagination |
+| `GET` | `/api/v1/resume/{id}` | Retrieve analysis by ID from the database |
+| `GET` | `/api/v1/resume/{id}/export` | Export analysis to PDF |
+| `GET` | `/health` | Health check |
 
-## Примеры ответов
+## Response Examples
 
-### Новый анализ (кэш MISS)
+### New analysis (cache MISS)
 
 ```json
 {
@@ -176,7 +174,7 @@ ollama pull llama3.2
 }
 ```
 
-### Результат из кэша (кэш HIT)
+### Result from cache (cache HIT)
 
 ```json
 {
@@ -186,97 +184,96 @@ ollama pull llama3.2
   "result": {
     "status": "success",
     "overall_score": 8,
-    "summary": "Резюме демонстрирует широкий стек и конкретные достижения с цифрами.",
+    "summary": "The resume demonstrates a broad tech stack and specific achievements backed by figures.",
     "criteria": {
       "skills": {
         "score": 9,
-        "feedback": "Актуальный стек, хорошее покрытие технологий.",
-        "suggestions": ["Добавить уровни владения технологиями", "Указать конкретные версии"]
+        "feedback": "Relevant tech stack; good coverage of technologies.",
+        "suggestions": ["Add proficiency levels for technologies", "Specify version numbers"]
       },
-      "experience": {
+"experience": {
         "score": 9,
-        "feedback": "Конкретные достижения с цифрами, хорошая прогрессия.",
-        "suggestions": ["Добавить ссылку на GitHub", "Описать командную работу"]
+        "feedback": "Concrete achievements with figures, good career progression.",
+        "suggestions": ["Add a GitHub link", "Describe teamwork"]
       },
       "structure": {
         "score": 7,
-        "feedback": "Структура понятная, но есть лишние блоки.",
-        "suggestions": ["Убрать дублирующиеся контакты", "Добавить раздел Summary"]
+        "feedback": "Clear structure, but contains some redundant sections.",
+        "suggestions": ["Remove duplicate contact details", "Add a Summary section"]
       },
       "language": {
         "score": 8,
-        "feedback": "Профессиональный тон, сильные глаголы действия.",
-        "suggestions": ["Убрать клише", "Сократить длинные предложения"]
+        "feedback": "Professional tone, strong action verbs.",
+        "suggestions": ["Remove clichés", "Shorten long sentences"]
       }
     },
-    "top_strengths": ["Конкретные метрики и достижения", "Современный стек", "Прогрессия карьеры"],
-    "top_improvements": ["Добавить раздел Summary", "Указать уровни владения навыками"],
+    "top_strengths": ["Concrete metrics and achievements", "Modern tech stack", "Career progression"],
+    "top_improvements": ["Add a Summary section", "Indicate skill proficiency levels"],
     "file_name": "resume.pdf"
   }
 }
 ```
 
-## Структура проекта
+## Project Structure
 
 ```
 resume_analyzer/
 ├── app/
 │   ├── api/
 │   │   └── v1/
-│   │       └── resume.py        # роутеры
+│   │       └── resume.py        # Routers
 │   ├── cache/
-│   │   └── resume.py            # Cache-Aside кэширование в Redis
+│   │   └── resume.py            # Cache-Aside caching in Redis
 │   ├── core/
-│   │   ├── config.py            # настройки
-│   │   └── database.py          # подключение к БД
+│   │   ├── config.py            # Configuration settings
+│   │   └── database.py          # Database connection
 │   ├── database/
-│   │   └── models.py            # SQLAlchemy модели
+│   │   └── models.py            # SQLAlchemy models
 │   ├── graph/
-│   │   ├── state.py             # состояние графа
-│   │   ├── nodes.py             # узлы агентов + фабрика LLM
-│   │   └── builder.py           # сборка графа
+│   │   ├── state.py             # Graph state
+│   │   ├── nodes.py             # Agent nodes + LLM factory
+│   │   └── builder.py           # Graph assembly
 │   ├── parsers/
-│   │   └── file.py              # парсинг PDF/TXT
+│   │   └── file.py              # PDF/TXT parsing
 │   ├── repositories/
-│   │   └── resume.py            # слой БД
+│   │ └── resume.py # DB layer
 │   ├── schemas/
-│   │   └── v1/
-│   │       └── resume.py        # Pydantic схемы
+│   │ └── v1/
+│   │ └── resume.py # Pydantic schemas
 │   ├── services/
-│   │   └── resume.py            # бизнес-логика
+│   │ └── resume.py # business logic
 │   ├── tasks/
-│   │   └── analyze.py           # Celery таск
-│   ├── celery_app.py            # инициализация Celery
-│   └── main.py                  # FastAPI приложение
+│   │ └── analyze.py # Celery task
+│   ├── celery_app.py # Celery initialization
+│   └── main.py # FastAPI application
 ├── tests/
 │   ├── unit/
-│   │   └── test_parsers.py
+│   │ └── test_parsers.py
 │   └── integration/
-│       ├── test_api.py
-│       ├── test_cache.py
-│       └── test_repository.py
+│   ├── test_api.py
+│   ├── test_cache.py
+│   └── test_repository.py
 ├── docker-compose.yml
 ├── Dockerfile
 ├── pyproject.toml
 └── requirements.txt
 ```
+## Development
 
-## Разработка
-
-### Запуск тестов
+### Running tests
 
 ```bash
-# Все тесты (testcontainers автоматически поднимет PostgreSQL)
+# All tests (testcontainers will automatically spin up PostgreSQL)
 pytest tests/ -v
 
-# Только юнит тесты
+# Unit tests only
 pytest tests/unit/ -v
 
-# Только интеграционные
+# Integration tests only
 pytest tests/integration/ -v
 ```
 
-### Линтеры
+### Linters
 
 ```bash
 ruff check app/
@@ -284,41 +281,40 @@ ruff format app/
 mypy app/
 ```
 
-### Pre-commit хуки
+### Pre-commit hooks
 
 ```bash
 pre-commit install
 pre-commit run --all-files
 ```
 
-### Проверка кэша в Redis
+### Checking Redis cache
 
 ```bash
-# Зайти в Redis CLI
+# Enter Redis CLI
 docker exec -it resume_analyzer_redis redis-cli
 
-# Посмотреть все ключи кэша
+# View all cache keys
 KEYS resume:analysis:*
 
-# Проверить TTL ключа
-TTL resume:analysis:<хэш>
+# Check key TTL
+TTL resume:analysis:<hash>
 ```
-
 ## Roadmap
 
-- [x] Анализ резюме через LangGraph с параллельными агентами
-- [x] Поддержка PDF и TXT
-- [x] Сохранение истории в PostgreSQL
-- [x] Чистая архитектура (api / services / graph / repositories)
-- [x] Celery + Redis — фоновая обработка, поллинг статуса
-- [x] Webhook уведомления (callback_url)
-- [x] Поддержка нескольких LLM провайдеров (Groq, Gemini, Ollama)
-- [x] Кэширование результатов через Redis (Cache-Aside, TTL 24ч)
+- [x] Resume analysis via LangGraph with parallel agents
+- [x] PDF and TXT support
+- [x] History persistence in PostgreSQL
+- [x] Clean architecture (api / services / graph / repositories)
+- [x] Celery + Redis — background processing, status polling
+- [x] Webhook notifications (callback_url)
+- [x] Support for multiple LLM providers (Groq, Gemini, Ollama)
+- [x] Result caching via Redis (Cache-Aside, 24h TTL)
 - [x] Docker + docker-compose
-- [x] Линтеры (ruff, mypy) и pre-commit хуки
-- [x] Тесты с testcontainers
-- [x] Экспорт отчёта в PDF
-- [ ] Аутентификация (JWT)
-- [ ] Сравнение резюме с вакансией
-- [ ] LangSmith для мониторинга агентов
+- [x] Linters (ruff, mypy) and pre-commit hooks
+- [x] Tests using Testcontainers
+- [x] PDF report export
+- [ ] Authentication (JWT)
+- [ ] Resume vs. job description comparison
+- [ ] LangSmith for agent monitoring
 - [ ] Kubernetes deployment
