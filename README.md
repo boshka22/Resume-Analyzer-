@@ -51,6 +51,7 @@ An AI service for result analysis based on LangGraph. It accepts a PDF or TXT fi
 - **PostgreSQL 16** — analysis history storage
 - **SQLAlchemy** — asynchronous ORM
 - **Docker + docker-compose** — containerization
+- **React + Vite** — frontend dashboard
 - **Ruff + mypy** — linters
 - **pytest + testcontainers** — testing
 
@@ -113,6 +114,8 @@ docker-compose up --build
 
 The API is available at [http://localhost:8000/docs](http://localhost:8000/docs)
 
+The frontend is available at [http://localhost:3000](http://localhost:3000)
+
 ### Ollama (local model, no API keys required)
 
 ```bash
@@ -122,6 +125,35 @@ ollama pull llama3.2
 # Set the following in .env:
 # LLM_PROVIDER=ollama
 # MODEL_NAME=llama3.2
+```
+
+
+## Frontend
+
+The project now includes a React + Vite frontend in the `frontend/` directory.
+
+### Frontend features
+
+- Upload PDF/TXT resumes through a drag-and-drop interface
+- Optional `callback_url` field for webhook notifications
+- Automatic polling for Celery task status
+- Cached result indicator when Redis returns a cache hit
+- Score, summary, criteria, strengths, and improvement recommendations
+- History view with PDF export links
+
+### Run frontend locally
+
+```bash
+cd frontend
+cp .env.example .env.local
+npm install
+npm run dev
+```
+
+By default, the frontend uses:
+
+```env
+VITE_API_BASE_URL=http://localhost:8000
 ```
 
 ## How asynchronous analysis works
@@ -246,6 +278,13 @@ resume_analyzer/
 │   │ └── analyze.py # Celery task
 │   ├── celery_app.py # Celery initialization
 │   └── main.py # FastAPI application
+├── frontend/                    # React + Vite frontend
+│   ├── src/
+│   │   ├── api.ts                # API client
+│   │   ├── App.tsx               # Main dashboard
+│   │   └── styles.css            # UI styles
+│   ├── Dockerfile                # Frontend production image
+│   └── README.md
 ├── tests/
 │   ├── unit/
 │   │ └── test_parsers.py
@@ -314,6 +353,7 @@ TTL resume:analysis:<hash>
 - [x] Linters (ruff, mypy) and pre-commit hooks
 - [x] Tests using Testcontainers
 - [x] PDF report export
+- [x] React + Vite frontend dashboard
 - [ ] Authentication (JWT)
 - [ ] Resume vs. job description comparison
 - [ ] LangSmith for agent monitoring
